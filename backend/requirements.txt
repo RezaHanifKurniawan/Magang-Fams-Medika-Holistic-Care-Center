@@ -1,0 +1,8 @@
+Flask
+flask-cors
+requests
+beautifulsoup4
+selenium
+undetected-chromedriver
+gunicorn
+psutil

@@ -1,0 +1,26 @@
+{
+  "Kab. Semarang": {
+    "kode": "032200",
+    "kecamatan": {
+      "Getasan": "032201",
+      "Tengaran": "032202",
+      "Susukan": "032203",
+      "Suruh": "032204",
+      "Pabelan": "032205",
+      "Tuntang": "032206",
+      "Banyubiru": "032207",
+      "Jambu": "032208",
+      "Sumowono": "032209",
+      "Ambarawa": "032210",
+      "Bawen": "032211",
+      "Bringin": "032212",
+      "Pringapus": "032213",
+      "Bergas": "032214",
+      "Kaliwungu": "032217",
+      "Bancak": "032218",
+      "Ungaran Barat": "032219",
+      "Ungaran Timur": "032220",
+      "Bandungan": "032221"
+    }
+  }
+}

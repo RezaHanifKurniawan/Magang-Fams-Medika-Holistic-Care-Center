@@ -1,0 +1,1 @@
+from .scraper import scrape_sd_kecamatan, load_kecamatan_list
