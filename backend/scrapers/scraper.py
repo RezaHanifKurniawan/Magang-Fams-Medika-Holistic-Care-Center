@@ -4,6 +4,7 @@ import time
 import psutil
 from bs4 import BeautifulSoup
 import requests
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Selenium imports
@@ -24,7 +25,7 @@ uc.logger.setLevel(logging.ERROR)
 
 
 # =================== CONFIG ===================
-MAX_WORKERS = 12
+MAX_WORKERS = 10
 HEADLESS = True
 TIMEOUT_PAGE = 12
 # ===============================================
@@ -150,7 +151,7 @@ def get_kode_kecamatan(nama):
 # =====================================================
 def extract_uuid_from_referensi(url, session):
     try:
-        r = session.get(url, timeout=10)
+        r = session.get(url, timeout=12)
         soup = BeautifulSoup(r.text, "html.parser")
         a = soup.find("a", href=lambda x: x and "profil-sekolah" in x)
         if a:
@@ -175,14 +176,94 @@ def fetch_detail_worker(link_base_tuple):
 
     driver = setup_standard_driver(headless=HEADLESS)
     
-    # fungsi normalisasi
+    # fungsi normalisasi data kosong (jadi "-")
     def clean_dash(v):
         if not v:
             return "-"
         v = v.strip()
-        if v in ["—", "–", "-", "", None, "0"]:
+        if v in ["-", "—", "–", "0", "", None, "N/A", "n/a"]:
             return "-"
         return v
+
+    # ================================
+    # VALIDATOR WEBSITE
+    # Mengembalikan "-" jika:
+    # - kosong atau hanya simbol
+    # - tidak memiliki domain + TLD
+    # - tidak memenuhi pola URL minimal
+    # Catatan:
+    # - subdomain (www) opsional
+    # - otomatis menambahkan https:// jika tidak ada
+    # ================================
+    def normalize_url(v):
+        v = clean_dash(v)
+        if v == "-":
+            return "-"
+        
+        v = v.strip()
+
+        # Tambahkan protokol bila perlu
+        if not (v.startswith("http://") or v.startswith("https://")):
+            v = "https://" + v
+
+        # Minimal: name.domain (tld ≥ 2 huruf)
+        pattern = r"^https?://([A-Za-z0-9-]+\.)+[A-Za-z]{2,}(/.*)?$"
+
+        if not re.match(pattern, v):
+            return "-"
+
+        return v
+
+    # ================================
+    # VALIDATOR EMAIL
+    # Mengembalikan "-" jika:
+    # - kosong atau simbol
+    # - tidak memiliki format user@domain.tld
+    # Domain bebas (.sch.id, .go.id, .com, dll)
+    # ================================
+    def normalize_email(v):
+        v = clean_dash(v)
+        if v == "-":
+            return "-"
+        
+        v = v.strip()
+
+        pattern = r"^[\w\.-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$"
+
+        if not re.match(pattern, v):
+            return "-"
+
+        return v
+
+    # ================================
+    # VALIDATOR TELEPON
+    # Mengembalikan "-" jika:
+    # - kosong atau simbol
+    # - terlalu pendek (< 6 digit)
+    # - tidak mengandung angka yang cukup
+    # Catatan:
+    # - hanya angka dan "+" yang dipertahankan
+    # ================================
+    def normalize_phone(v):
+        v = clean_dash(v)
+        if v == "-":
+            return "-"
+        
+        v = v.strip()
+
+        # Ambil hanya angka dan tanda tambah
+        cleaned = re.sub(r"[^\d+]", "", v)
+        cleaned = re.sub(r"\++", "+", cleaned)
+
+        # Jika hanya "+" atau kosong → invalid
+        if cleaned == "+" or cleaned == "":
+            return "-"
+
+        # Minimal panjang nomor telepon
+        if len(cleaned.replace("+", "")) < 6:
+            return "-"
+
+        return cleaned
 
     detail = {
         "Alamat": "-",
@@ -230,7 +311,7 @@ def fetch_detail_worker(link_base_tuple):
                 elif "telepon" in label:
                     try:
                         val = blk.find_element(By.TAG_NAME, "a").text
-                        detail["Telepon"] = clean_dash(val)
+                        detail["Telepon"] = normalize_phone(val)
                     except:
                         pass
 
@@ -238,7 +319,7 @@ def fetch_detail_worker(link_base_tuple):
                 elif "email" in label:
                     try:
                         val = blk.find_element(By.TAG_NAME, "a").text
-                        detail["Email"] = clean_dash(val)
+                        detail["Email"] = normalize_email(val)
                     except:
                         pass
 
@@ -246,9 +327,7 @@ def fetch_detail_worker(link_base_tuple):
                 elif "website" in label:
                     try:
                         href = blk.find_element(By.TAG_NAME, "a").get_attribute("href")
-                        if not href or not href.startswith("http"):
-                            href = "-"
-                        detail["Website"] = clean_dash(href)
+                        detail["Website"] = normalize_url(href)
                     except:
                         detail["Website"] = "-"
 
