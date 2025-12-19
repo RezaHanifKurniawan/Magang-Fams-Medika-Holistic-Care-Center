@@ -1,7 +1,8 @@
 import {
   CloudArrowDownIcon, EyeIcon, EyeSlashIcon,
-  FunnelIcon, DocumentArrowDownIcon, ExclamationTriangleIcon
+  FunnelIcon, ExclamationTriangleIcon
 } from "@heroicons/react/24/outline";
+import Logo from "./assets/icon.png";
 
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { fetchKecamatan, previewScrape } from "./services/api";
@@ -61,6 +62,7 @@ const COLUMN_ORDER = [
   "Jumlah Siswa Laki-laki",
   "Jumlah Siswa Perempuan"
 ];
+
 
 /* ==========================================================
    CSV / XLSX EXPORT
@@ -181,6 +183,7 @@ export default function App() {
 
   const [preview, setPreview] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [scrapedRows, setScrapedRows] = useState(null);
 
   /* ==========================================================
      LOAD KECAMATAN LIST
@@ -274,38 +277,39 @@ export default function App() {
       return;
     }
 
-    // ============= RESET FE =============
-    setShowPreview(false);     // sembunyikan preview
-    setPreview(null);          // clear preview
-    setScrapStarted(false);    // toggle ulang
-    cacheRef.current = { key: null, rows: null }; // reset cache
-    // =====================================
+    setShowPreview(false);
+    setPreview(null);
+    setScrapStarted(false);
+    setScrapedRows(null);
+    cacheRef.current = { key: null, rows: null };
 
     AlertLoading("Sedang melakukan scraping...");
 
     try {
-      await getScrape({ force: true });
+      const rows = await getScrape({ force: true });
+
+      setScrapedRows(rows);      // ✅ SIMPAN HASIL
       setScrapStarted(true);
 
       AlertSuccess("Scraping selesai! Anda dapat membuka Preview atau Download data.");
-
-    } catch (e) {
+    } catch {
       AlertError("Terjadi kesalahan saat memproses data.");
     }
   }
 
+
   /* ==========================================================
      PREVIEW
      ========================================================== */
-  async function onPreviewToggle() {
-    if (!scrapStarted) return;
+  function onPreviewToggle() {
+    if (!scrapStarted || !scrapedRows) return;
+
     if (showPreview) {
       setShowPreview(false);
       return;
     }
 
-    const rows = await getScrape({ force: false });
-    setPreview(rows.slice(0, 5));
+    setPreview(scrapedRows.slice(0, 5));
     setShowPreview(true);
   }
 
@@ -313,9 +317,7 @@ export default function App() {
      DOWNLOAD
      ========================================================== */
   async function onDownload() {
-    if (!scrapStarted) return;
-
-    const rows = await getScrape({ force: false });
+    if (!scrapStarted || !scrapedRows) return;
 
     const ok = await AlertConfirm(
       `Download data dalam format ${format.toUpperCase()}?`
@@ -324,7 +326,7 @@ export default function App() {
 
     const filename = `data_sd_${filters.kecamatan.replace(/\s+/g, "_")}.${format}`;
 
-    exportData(rows, filename, format);
+    exportData(scrapedRows, filename, format);
     AlertSuccess("Download berhasil!");
   }
 
@@ -373,9 +375,11 @@ export default function App() {
       <header className="border-b bg-white/70 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-indigo-600 text-white grid place-items-center shadow">
-              <FunnelIcon className="h-6 w-6" />
-            </div>
+              <img
+                src={Logo}
+                alt="Logo"
+                className="h-20 w-20 object-contain drop-shadow-[8px_8px_8px_rgba(0,0,0,0.6)]"
+              />
             <div>
               <h1 className="text-xl md:text-2xl font-semibold">
                 Scraper SD — <span className="text-slate-600">Kabupaten Semarang</span>

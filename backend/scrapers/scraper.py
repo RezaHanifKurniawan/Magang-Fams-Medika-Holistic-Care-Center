@@ -7,17 +7,20 @@ import requests
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ===================== GLOBAL PID TRACKER =====================
+CHROME_PIDS = set()
+
 # Selenium imports
 try:
     from selenium import webdriver
-    from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.chrome.options import Options as ChromeOptions
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait, Select
     from selenium.webdriver.support import expected_conditions as EC
-    STANDARD_SELENIUM_AVAILABLE = True
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
 except Exception:
-    STANDARD_SELENIUM_AVAILABLE = False
+    pass
 
 import undetected_chromedriver as uc
 import logging
@@ -25,63 +28,65 @@ uc.logger.setLevel(logging.ERROR)
 
 
 # =================== CONFIG ===================
-MAX_WORKERS = 10
+MAX_WORKERS = 8
 HEADLESS = True
 TIMEOUT_PAGE = 12
+BASE_DIR = os.path.dirname(__file__)
+DATA_FILE = os.path.join(BASE_DIR, "data", "kecamatan_kab_semarang.json")
 # ===============================================
 
 
-BASE_DIR = os.path.dirname(__file__)
-DATA_FILE = os.path.join(BASE_DIR, "data", "kecamatan_kab_semarang.json")
-
-
 # =====================================================
-#  UC Driver (for LISTING only)
+#  UC Driver (LISTING)
 # =====================================================
 def setup_uc_driver(headless=True):
     opts = uc.ChromeOptions()
     if headless:
         opts.add_argument("--headless=new")
+
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=1600,900")
-    opts.add_argument("--blink-settings=imagesEnabled=false")
     opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1600,900")
     opts.add_argument("--log-level=3")
 
-    try:
-        driver = uc.Chrome(options=opts)
-    except:
-        driver = setup_standard_driver(headless=headless)
-
+    # 🔥 WAJIB di VPS / WSL
+    CHROME_BINARY = "/usr/bin/google-chrome"
+    opts.binary_location = CHROME_BINARY
+    
+    driver = uc.Chrome(options=opts, version_main=0)
     driver.set_page_load_timeout(TIMEOUT_PAGE)
+
+    try:
+        CHROME_PIDS.add(driver.service.process.pid)
+    except Exception:
+        pass
     return driver
+
 
 
 # =====================================================
 #  Standard Selenium (DETAIL)
 # =====================================================
 def setup_standard_driver(headless=True):
-    try:
-        opts = ChromeOptions()
-        if headless:
-            opts.add_argument("--headless=new")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--window-size=1600,900")
-        opts.add_argument("--blink-settings=imagesEnabled=false")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("--log-level=3")
+    opts = ChromeOptions()
+    if headless:
+        opts.add_argument("--headless=new")
 
-        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-        opts.add_experimental_option("useAutomationExtension", False)
+    opts.binary_location = "/usr/bin/google-chrome"
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1600,900")
 
-        driver = webdriver.Chrome(options=opts)
-        driver.set_page_load_timeout(TIMEOUT_PAGE)
-        return driver
-    except:
-        return setup_uc_driver(headless=headless)
+    service = Service(ChromeDriverManager().install())
 
+    driver = webdriver.Chrome(
+        service=service,
+        options=opts
+    )
+    driver.set_page_load_timeout(30)
+    return driver
 
 # =====================================================
 #  Requests fast session
@@ -95,36 +100,23 @@ def create_fast_session():
     return s
 
 # =====================================================
-# ORPHAN CLEANER (RUN AFTER SCRAPE DONE)
+#  SAFE CLEANUP (LINUX & WINDOWS SAFE)
 # =====================================================
-def cleanup_orphan_chrome():
+def cleanup_safe_chrome():
     """
-    SAFEST METHOD:
-    Kill ONLY orphaned chrome/chromedriver/uc
-    whose parent process is gone.
+    Kill ONLY Chrome processes created by THIS script.
     """
-    targets = ("chrome.exe", "chromedriver.exe", "undetected_chromedriver.exe")
-
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'ppid']):
-        name = proc.info["name"]
-        if not name:
-            continue
-        if name.lower() not in targets:
-            continue
-
-        parent_pid = proc.info["ppid"]
-
+    for pid in list(CHROME_PIDS):
         try:
-            psutil.Process(parent_pid)
-            # parent still exists → not orphan
-            continue
+            p = psutil.Process(pid)
+            if p.is_running():
+                p.terminate()
         except psutil.NoSuchProcess:
-            # parent is gone → orphan, safe to kill
-            try:
-                print(f"[CLEAN] Killing orphan {name} (PID {proc.pid})")
-                proc.kill()
-            except:
-                pass
+            pass
+        except Exception:
+            pass
+        finally:
+            CHROME_PIDS.discard(pid)
 
 # =====================================================
 #  LOAD KECAMATAN FOR FE
@@ -164,7 +156,7 @@ def extract_uuid_from_referensi(url, session):
 # =====================================================
 # Worker DETAIL
 # =====================================================
-def fetch_detail_worker(link_base_tuple):
+def fetch_detail_worker(link_base_tuple, fields):
     link, base = link_base_tuple
     session = create_fast_session()
 
@@ -173,7 +165,6 @@ def fetch_detail_worker(link_base_tuple):
         return base
 
     url = f"https://sekolah.data.kemendikdasmen.go.id/profil-sekolah/{uuid}"
-
     driver = setup_standard_driver(headless=HEADLESS)
     
     # fungsi normalisasi data kosong (jadi "-")
@@ -264,99 +255,77 @@ def fetch_detail_worker(link_base_tuple):
             return "-"
 
         return cleaned
-
-    detail = {
-        "Alamat": "-",
-        "Kepala Sekolah": "-",
-        "Telepon": "-",
-        "Email": "-",
-        "Website": "-",
-        "Yayasan": "-",
-        "Jumlah Siswa Laki-laki": "-",
-        "Jumlah Siswa Perempuan": "-",
+    
+    # 🔑 MAP LABEL HTML -> NAMA FIELD FE
+    FIELD_MAP = {
+        "kepala": "Kepala Sekolah",
+        "telepon": "Telepon",
+        "email": "Email",
+        "website": "Website",
+        "yayasan": "Yayasan",
     }
+
+    detail = {}
 
     try:
         driver.get(url)
         time.sleep(1)
 
         # Alamat
-        try:
-            WebDriverWait(driver, 12).until(
-                EC.visibility_of_element_located((By.CSS_SELECTOR, "h1 + p"))
-            )
-            addr = driver.find_element(By.CSS_SELECTOR, "h1 + p").text
-            detail["Alamat"] = clean_dash(addr)
-        except:
-            detail["Alamat"] = "-"
+        if "Alamat" in fields:
+            try:
+                WebDriverWait(driver, 12).until(
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, "h1 + p"))
+                )
+                detail["Alamat"] = clean_dash(
+                    driver.find_element(By.CSS_SELECTOR, "h1 + p").text
+                )
+            except:
+                detail["Alamat"] = "-"
 
-        # Kepala sekolah, email, telepon, yayasan
+        # Blok info (kepsek, telp, email, website, yayasan)
         try:
             blocks = driver.find_elements(By.CSS_SELECTOR, "div.grid div.flex")
             for blk in blocks:
                 try:
-                    label = blk.find_element(By.CSS_SELECTOR, ".text-slate-500").text.lower().strip()
+                    label = blk.find_element(By.CSS_SELECTOR, ".text-slate-500").text.lower()
                 except:
                     continue
 
-                # Kepala Sekolah
-                if "kepala" in label:
-                    try:
-                        val = blk.find_element(By.CSS_SELECTOR, ".font-semibold").text
-                        detail["Kepala Sekolah"] = clean_dash(val)
-                    except:
-                        pass
-
-                # Telepon
-                elif "telepon" in label:
-                    try:
-                        val = blk.find_element(By.TAG_NAME, "a").text
-                        detail["Telepon"] = normalize_phone(val)
-                    except:
-                        pass
-
-                # Email
-                elif "email" in label:
-                    try:
-                        val = blk.find_element(By.TAG_NAME, "a").text
-                        detail["Email"] = normalize_email(val)
-                    except:
-                        pass
-
-                # Website (ambil href ALWAYS)
-                elif "website" in label:
-                    try:
-                        href = blk.find_element(By.TAG_NAME, "a").get_attribute("href")
-                        detail["Website"] = normalize_url(href)
-                    except:
-                        detail["Website"] = "-"
-
-                # Yayasan
-                elif "yayasan" in label:
-                    try:
-                        val = blk.find_element(By.CSS_SELECTOR, ".font-semibold").text
-                        detail["Yayasan"] = clean_dash(val)
-                    except:
-                        pass
+                for key, field_name in FIELD_MAP.items():
+                    if key in label and field_name in fields:
+                        try:
+                            if field_name == "Website":
+                                href = blk.find_element(By.TAG_NAME, "a").get_attribute("href")
+                                detail[field_name] = normalize_url(href)
+                            elif field_name == "Telepon":
+                                val = blk.find_element(By.TAG_NAME, "a").text
+                                detail[field_name] = normalize_phone(val)
+                            elif field_name == "Email":
+                                val = blk.find_element(By.TAG_NAME, "a").text
+                                detail[field_name] = normalize_email(val)
+                            else:
+                                val = blk.find_element(By.CSS_SELECTOR, ".font-semibold").text
+                                detail[field_name] = clean_dash(val)
+                        except:
+                            detail[field_name] = "-"
         except:
             pass
 
-        # Statistik jumlah siswa
+        # Statistik siswa
         try:
-            time.sleep(1)
             blocks = driver.find_elements(By.CSS_SELECTOR, "section div.grid div.flex")
             for b in blocks:
                 try:
-                    lbl = b.find_element(By.CSS_SELECTOR, "div.text-slate-600").text.lower().strip()
-                    raw_val = b.find_element(By.CSS_SELECTOR, "div.text-2xl").text.strip()
+                    lbl = b.find_element(By.CSS_SELECTOR, "div.text-slate-600").text.lower()
+                    raw_val = b.find_element(By.CSS_SELECTOR, "div.text-2xl").text
                     val = clean_dash(raw_val)
                 except:
                     continue
 
-                if "laki" in lbl:
+                if "Jumlah Siswa Laki-laki" in fields and "laki" in lbl:
                     detail["Jumlah Siswa Laki-laki"] = val
-
-                if "perempuan" in lbl:
+                if "Jumlah Siswa Perempuan" in fields and "perempuan" in lbl:
                     detail["Jumlah Siswa Perempuan"] = val
         except:
             pass
@@ -434,7 +403,7 @@ def scrape_sd_kecamatan(nama_kecamatan, fields):
     if need_detail and urls:
         results = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-            futures = [ex.submit(fetch_detail_worker, u) for u in urls]
+            futures = [ex.submit(fetch_detail_worker, u, fields)for u in urls]
             for fut in as_completed(futures):
                 try:
                     row = fut.result()
@@ -448,7 +417,7 @@ def scrape_sd_kecamatan(nama_kecamatan, fields):
         key = fields[0]
         sekolah_list.sort(key=lambda x: str(x.get(key, "")).lower())
         
-    # ========== CLEANUP ORPHANS AFTER ALL SCRAPE ==========
-    cleanup_orphan_chrome()
+    # ========== SAFE CLEANUP ==========
+    cleanup_safe_chrome()
 
     return sekolah_list
