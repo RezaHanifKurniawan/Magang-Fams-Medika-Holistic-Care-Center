@@ -423,7 +423,7 @@ export default function App() {
                   setFilters(f => ({ ...f, kecamatan: v }));
                   updateSuggestions(v);
                 }}
-                onBlur={() => setTimeout(() => setKecSuggestions([]), 150)}
+                onBlur={() => setTimeout(() => setKecSuggestions([]), 300000)}
               />
 
               {kecSuggestions.length > 0 && (

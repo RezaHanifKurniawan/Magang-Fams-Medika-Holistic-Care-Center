@@ -28,9 +28,9 @@ uc.logger.setLevel(logging.ERROR)
 
 
 # =================== CONFIG ===================
-MAX_WORKERS = 8
+MAX_WORKERS = 5
 HEADLESS = True
-TIMEOUT_PAGE = 12
+TIMEOUT_PAGE = 20
 BASE_DIR = os.path.dirname(__file__)
 DATA_FILE = os.path.join(BASE_DIR, "data", "kecamatan_kab_semarang.json")
 # ===============================================

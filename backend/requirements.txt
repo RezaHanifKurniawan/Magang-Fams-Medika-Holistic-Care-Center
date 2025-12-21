@@ -6,3 +6,4 @@ selenium
 undetected-chromedriver
 gunicorn
 psutil
+webdriver-manager
