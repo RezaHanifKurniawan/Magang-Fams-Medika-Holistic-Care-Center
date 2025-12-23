@@ -1,0 +1,34 @@
+services:
+  frontend:
+    container_name: scraping-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    networks:
+      - core
+    restart: always
+
+  backend:
+    container_name: scraping-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    networks:
+      - core
+    restart: always
+
+  webserver:
+    container_name: scraping-caddy
+    image: caddy:2.11-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - core
+    restart: always
+
+networks:
+  core:
+    driver: bridge
