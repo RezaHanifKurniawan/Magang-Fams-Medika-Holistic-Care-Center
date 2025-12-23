@@ -1,0 +1,18 @@
+{
+	servers {
+		timeouts {
+			read_body   1800s
+			read_header 1800s
+			write       1800s
+			idle        1800s
+		}
+	}
+}
+
+scraping.my.id {
+	reverse_proxy frontend:5173
+}
+
+api.scraping.my.id {
+	reverse_proxy backend:8000
+}
