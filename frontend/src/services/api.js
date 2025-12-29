@@ -18,55 +18,39 @@ export async function fetchKecamatan() {
   }
 }
 
+// =============================
+// SCRAPER DATA
+// =============================
+export async function startScrape(payload) {
+  const res = await fetch(`${BASE_URL}/scrape_sd`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const msg = await res.json();
+    throw new Error(msg.error || "Gagal scraping");
+  }
+
+  return await res.json();
+}
+
+
 
 // =============================
 // PREVIEW SCRAPE
 // =============================
-// Body:
-//   {
-//     kecamatan: "...",
-//     fields: [ "Nama Sekolah", "NPSN", ... ]
-//   }
-export async function previewScrape(payload) {
-  try {
-    const res = await fetch(`${BASE_URL}/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const msg = await res.json();
-      throw new Error(msg.error || "Gagal preview");
-    }
-
-    return await res.json(); // { rows: [...] }
-  } catch (err) {
-    console.error("previewScrape error:", err);
-    throw err;
-  }
+export async function previewScrape() {
+  const res = await fetch(`${BASE_URL}/preview`);
+  return await res.json();
 }
 
 
 // =============================
-// DOWNLOAD SCRAPE (FULL ROWS)
+// DOWNLOAD SCRAPE
 // =============================
-export async function downloadScrape(payload) {
-  try {
-    const res = await fetch(`${BASE_URL}/download`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const msg = await res.json();
-      throw new Error(msg.error || "Gagal download");
-    }
-
-    return await res.json(); // { rows: [...] }
-  } catch (err) {
-    console.error("downloadScrape error:", err);
-    throw err;
-  }
+export async function downloadScrape() {
+  const res = await fetch(`${BASE_URL}/download`);
+  return await res.json();
 }

@@ -63,8 +63,6 @@ def setup_uc_driver(headless=True):
         pass
     return driver
 
-
-
 # =====================================================
 #  Standard Selenium (DETAIL)
 # =====================================================
@@ -143,11 +141,11 @@ def get_kode_kecamatan(nama):
 # =====================================================
 def extract_uuid_from_referensi(url, session):
     try:
-        r = session.get(url, timeout=12)
+        r = session.get(url, timeout=20)
         soup = BeautifulSoup(r.text, "html.parser")
         a = soup.find("a", href=lambda x: x and "profil-sekolah" in x)
         if a:
-            return a["href"].rstrip("/").split("/")[-1]
+            return a["href"]
     except:
         return None
     return None
@@ -160,17 +158,14 @@ def fetch_detail_worker(link_base_tuple, fields):
     link, base = link_base_tuple
     session = create_fast_session()
 
-    uuid = extract_uuid_from_referensi(link, session)
-    if not uuid:
+    url = extract_uuid_from_referensi(link, session)
+    if not url:
         return base
-
-    url = f"https://sekolah.data.kemendikdasmen.go.id/profil-sekolah/{uuid}"
+    
     driver = setup_standard_driver(headless=HEADLESS)
     
     # fungsi normalisasi data kosong (jadi "-")
     def clean_dash(v):
-        if not v:
-            return "-"
         v = v.strip()
         if v in ["-", "—", "–", "0", "", None, "N/A", "n/a"]:
             return "-"
@@ -188,14 +183,6 @@ def fetch_detail_worker(link_base_tuple, fields):
     # ================================
     def normalize_url(v):
         v = clean_dash(v)
-        if v == "-":
-            return "-"
-        
-        v = v.strip()
-
-        # Tambahkan protokol bila perlu
-        if not (v.startswith("http://") or v.startswith("https://")):
-            v = "https://" + v
 
         # Minimal: name.domain (tld ≥ 2 huruf)
         pattern = r"^https?://([A-Za-z0-9-]+\.)+[A-Za-z]{2,}(/.*)?$"
@@ -204,7 +191,6 @@ def fetch_detail_worker(link_base_tuple, fields):
             return "-"
 
         return v
-
     # ================================
     # VALIDATOR EMAIL
     # Mengembalikan "-" jika:
@@ -214,10 +200,6 @@ def fetch_detail_worker(link_base_tuple, fields):
     # ================================
     def normalize_email(v):
         v = clean_dash(v)
-        if v == "-":
-            return "-"
-        
-        v = v.strip()
 
         pattern = r"^[\w\.-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$"
 
@@ -237,14 +219,9 @@ def fetch_detail_worker(link_base_tuple, fields):
     # ================================
     def normalize_phone(v):
         v = clean_dash(v)
-        if v == "-":
-            return "-"
-        
-        v = v.strip()
 
         # Ambil hanya angka dan tanda tambah
         cleaned = re.sub(r"[^\d+]", "", v)
-        cleaned = re.sub(r"\++", "+", cleaned)
 
         # Jika hanya "+" atau kosong → invalid
         if cleaned == "+" or cleaned == "":
@@ -269,12 +246,15 @@ def fetch_detail_worker(link_base_tuple, fields):
 
     try:
         driver.get(url)
-        time.sleep(1)
+        # time.sleep(20)
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "app-root"))
+        )
 
         # Alamat
         if "Alamat" in fields:
             try:
-                WebDriverWait(driver, 12).until(
+                WebDriverWait(driver, 20).until(
                     EC.visibility_of_element_located((By.CSS_SELECTOR, "h1 + p"))
                 )
                 detail["Alamat"] = clean_dash(
@@ -370,7 +350,7 @@ def scrape_sd_kecamatan(nama_kecamatan, fields):
         # set 100 rows
         try:
             Select(list_driver.find_element(By.NAME, "table1_length")).select_by_value("100")
-            time.sleep(1)
+            time.sleep(10)
         except:
             pass
 

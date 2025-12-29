@@ -18,4 +18,4 @@ RUN pip install webdriver-manager
 
 COPY . .
 
-CMD [ "gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--log-level", "debug", "app:app" ]
+CMD [ "gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--worker-class", "gthread", "--timeout", "180", "--log-level", "debug", "app:app" ]

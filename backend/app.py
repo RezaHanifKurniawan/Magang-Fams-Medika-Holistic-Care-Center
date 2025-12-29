@@ -5,6 +5,12 @@ from scrapers import scrape_sd_kecamatan, load_kecamatan_list
 app = Flask(__name__)
 CORS(app)
 
+SCRAPE_CACHE = {
+    "rows": None,
+    "kecamatan": None,
+    "fields": None
+}
+
 # ===============================
 # ROOT ENDPOINT
 # ===============================
@@ -15,8 +21,8 @@ def root():
         "endpoints": {
             "GET /kecamatan": "Get list of kecamatan",
             "POST /scrape_sd": "Scrape SD/MI data by kecamatan",
-            "POST /preview": "Preview scraped data (limited rows)",
-            "POST /download": "Download full scraped data"
+            "GET /preview": "Preview scraped data (limited rows)",
+            "GET /download": "Download full scraped data"
         }
     }, 200
 
@@ -30,12 +36,11 @@ def kecamatan():
     except:
         return jsonify([])
 
-
 # ===============================
-# PREVIEW (scrap 1x)
+# SCRAPING MODUL
 # ===============================
-@app.route("/preview", methods=["POST"])
-def preview():
+@app.route("/scrape_sd", methods=["POST"])
+def scrape_sd():
     data = request.get_json()
     kec = data.get("kecamatan", "").strip()
     fields = data.get("fields", [])
@@ -47,25 +52,39 @@ def preview():
 
     rows = scrape_sd_kecamatan(kec, fields)
 
+    # SIMPAN HASIL SCRAPING
+    SCRAPE_CACHE["rows"] = rows
+    SCRAPE_CACHE["kecamatan"] = kec
+    SCRAPE_CACHE["fields"] = fields
+
     return jsonify({
-        "rows": rows[:2000]  # safety
+        "status": "success",
+        "total_rows": len(rows)
     })
 
 
 # ===============================
-# DOWNLOAD (full rows)
+# PREVIEW
 # ===============================
-@app.route("/download", methods=["POST"])
+@app.route("/preview", methods=["GET"])
+def preview():
+    if not SCRAPE_CACHE["rows"]:
+        return jsonify({"rows": []})
+
+    return jsonify({
+        "rows": SCRAPE_CACHE["rows"]
+    })
+
+
+# ===============================
+# DOWNLOAD
+# ===============================
+@app.route("/download", methods=["GET"])
 def download():
-    data = request.get_json()
-    kec = data.get("kecamatan", "").strip()
-    fields = data.get("fields", [])
+    if not SCRAPE_CACHE["rows"]:
+        return jsonify({"rows": []})
 
-    if not kec:
-        return jsonify({"error": "Kecamatan wajib diisi"}), 400
-    if not fields:
-        return jsonify({"error": "Minimal 1 field wajib dipilih"}), 400
+    return jsonify({
+        "rows": SCRAPE_CACHE["rows"]
+    })
 
-    rows = scrape_sd_kecamatan(kec, fields)
-
-    return jsonify({"rows": rows})

@@ -4,12 +4,18 @@ import {
 } from "@heroicons/react/24/outline";
 import Logo from "./assets/icon.png";
 
-import React, { useMemo, useRef, useState, useEffect } from "react";
-import { fetchKecamatan, previewScrape } from "./services/api";
+import React, { useMemo, useState, useEffect } from "react";
+import {
+  fetchKecamatan,
+  startScrape,
+  previewScrape
+} from "./services/api";
+
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid
 } from "recharts";
+
 import ExcelJS from "exceljs/dist/exceljs.min.js";
 import {
   AlertSuccess,
@@ -19,9 +25,8 @@ import {
   AlertLoading
 } from "../utils/alert";
 
-
 /* ==========================================================
-   FIELD LIST – AUTO GENERATE FIELD_MAP
+   FIELD LIST
    ========================================================== */
 const FIELD_LABELS = [
   "Nama Sekolah",
@@ -44,65 +49,41 @@ const FIELD_MAP = FIELD_LABELS.reduce((acc, label) => {
   return acc;
 }, {});
 
-/* ==========================================================
-   PRIORITAS KOLOM + NO URUT
-   ========================================================== */
-const COLUMN_ORDER = [
-  "No",
-  "Nama Sekolah",
-  "Kelurahan",
-  "NPSN",
-  "Status",
-  "Kepala Sekolah",
-  "Alamat",
-  "Telepon",
-  "Email",
-  "Website",
-  "Yayasan",
-  "Jumlah Siswa Laki-laki",
-  "Jumlah Siswa Perempuan"
-];
-
+function makeColumnOrder(selectedFields) {
+  return ["No", ...selectedFields];
+}
 
 /* ==========================================================
-   CSV / XLSX EXPORT
+   EXPORT DATA
    ========================================================== */
-function exportData(rows, filename, format) {
+function exportData(rows, filename, format, columns) {
   const ordered = rows.map(r => {
     const obj = {};
-    COLUMN_ORDER.forEach(c => {
-      obj[c] = r[c] ?? "";
-    });
+    columns.forEach(c => (obj[c] = r[c] ?? ""));
     return obj;
   });
 
   if (format === "csv") {
-    const header = COLUMN_ORDER.join(",");
+    const header = columns.join(",");
     const lines = ordered.map(row =>
-      COLUMN_ORDER.map(c => JSON.stringify(row[c] ?? "")).join(",")
+      columns.map(c => JSON.stringify(row[c] ?? "")).join(",")
     );
     const csv = [header, ...lines].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
     return;
   }
 
-  // XLSX via ExcelJS (browser-safe)
   if (format === "xlsx") {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("Data");
 
-    sheet.addRow(COLUMN_ORDER);   // Header
+    sheet.addRow(columns);
+    ordered.forEach(row => sheet.addRow(columns.map(c => row[c] ?? "")));
 
-    ordered.forEach(row => {
-      sheet.addRow(COLUMN_ORDER.map(c => row[c] ?? ""));
-    });
-
-    // Auto column width
     sheet.columns.forEach(col => {
       let max = 10;
       col.eachCell(cell => {
@@ -115,20 +96,16 @@ function exportData(rows, filename, format) {
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       });
-      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = URL.createObjectURL(blob);
       a.download = filename;
       a.click();
-      URL.revokeObjectURL(url);
     });
-
-    return;
   }
 }
 
 /* ==========================================================
-   SORT PRIORITY FOR PREVIEW TABLE
+   SORTING
    ========================================================== */
 const SORT_PRIORITY = [
   "Kelurahan",
@@ -145,14 +122,22 @@ const SORT_PRIORITY = [
   "Jumlah Siswa Perempuan"
 ];
 
-/* ==========================================================
-   Helpers CONVERT TO INT
-   ========================================================== */
+function sortRows(rows) {
+  return [...rows].sort((a, b) => {
+    for (const key of SORT_PRIORITY) {
+      const av = String(a[key] ?? "").toLowerCase();
+      const bv = String(b[key] ?? "").toLowerCase();
+      if (av < bv) return -1;
+      if (av > bv) return 1;
+    }
+    return 0;
+  });
+}
+
 function toInt(v) {
   const n = parseInt(String(v).replace(/\D+/g, ""), 10);
   return isNaN(n) ? 0 : n;
 }
-
 
 /* ==========================================================
    MAIN COMPONENT
@@ -168,6 +153,8 @@ export default function App() {
 
   const [allKecamatan, setAllKecamatan] = useState([]);
   const [kecSuggestions, setKecSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+
 
   const [fieldStatus, setFieldStatus] = useState(
     Object.keys(FIELD_MAP).reduce((acc, k) => {
@@ -177,16 +164,16 @@ export default function App() {
   );
 
   const [scrapStarted, setScrapStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const cacheRef = useRef({ key: null, rows: null });
+  const [scrapedRows, setScrapedRows] = useState(null);
+  const [scrapedFields, setScrapedFields] = useState(null);
 
   const [preview, setPreview] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
-  const [scrapedRows, setScrapedRows] = useState(null);
+  const [previewLimit, setPreviewLimit] = useState(5);
+
 
   /* ==========================================================
-     LOAD KECAMATAN LIST
+     LOAD KECAMATAN
      ========================================================== */
   useEffect(() => {
     fetchKecamatan().then(list => setAllKecamatan(list || []));
@@ -202,7 +189,6 @@ export default function App() {
     const prefix = allKecamatan.filter(x =>
       x.toLowerCase().startsWith(lower)
     );
-
     const contains = allKecamatan.filter(x =>
       !x.toLowerCase().startsWith(lower) &&
       x.toLowerCase().includes(lower)
@@ -217,55 +203,8 @@ export default function App() {
   const selectedFieldKeys = Object.keys(fieldStatus).filter(k => fieldStatus[k]);
   const fieldsForBackend = selectedFieldKeys.map(k => FIELD_MAP[k].backend);
 
-  function makeCacheKey() {
-    return JSON.stringify({
-      kecamatan: filters.kecamatan,
-      fields: fieldsForBackend.slice().sort()
-    });
-  }
-
-  async function getScrape({ force = false } = {}) {
-    const key = makeCacheKey();
-
-    if (!force && cacheRef.current.key === key) {
-      return cacheRef.current.rows;
-    }
-
-    setLoading(true);
-    try {
-      const data = await previewScrape({
-        kecamatan: filters.kecamatan,
-        fields: fieldsForBackend
-      });
-
-      let rows = Array.isArray(data?.rows) ? data.rows : [];
-
-      // === SORTING SESUAI PRIORITAS ===
-      rows.sort((a, b) => {
-        for (const key of SORT_PRIORITY) {
-          const av = String(a[key] ?? "").toLowerCase();
-          const bv = String(b[key] ?? "").toLowerCase();
-          if (av < bv) return -1;
-          if (av > bv) return 1;
-        }
-        return 0;
-      });
-
-      // Tambahkan kolom No dan urutkan sesuai order
-      const finalRows = rows.map((r, idx) => ({
-        No: idx + 1,
-        ...r
-      }));
-
-      cacheRef.current = { key, rows: finalRows };
-      return finalRows;
-    } finally {
-      setLoading(false);
-    }
-  }
-
   /* ==========================================================
-     MULAI SCRAP
+     MULAI SCRAP (SATU-SATUNYA SCRAP)
      ========================================================== */
   async function onStartScrap() {
     if (!filters.kecamatan.trim()) {
@@ -277,26 +216,61 @@ export default function App() {
       return;
     }
 
-    setShowPreview(false);
-    setPreview(null);
-    setScrapStarted(false);
-    setScrapedRows(null);
-    cacheRef.current = { key: null, rows: null };
+    const isValidKecamatan = allKecamatan.some(
+    k => k.toLowerCase() === filters.kecamatan.toLowerCase()
+    );
 
+    if (!isValidKecamatan) {
+      AlertError("Kecamatan tidak ditemukan dalam daftar.");
+      return;
+    }
+
+    setLoading(true);
     AlertLoading("Sedang melakukan scraping...");
 
     try {
-      const rows = await getScrape({ force: true });
+      // 1️⃣ SCRAP (cache di BE)
+      await startScrape({
+        kecamatan: filters.kecamatan,
+        fields: fieldsForBackend
+      });
 
-      setScrapedRows(rows);      // ✅ SIMPAN HASIL
+      // 2️⃣ AMBIL DATA DARI CACHE BE
+      const res = await previewScrape();
+      const rows = Array.isArray(res?.rows) ? res.rows : [];
+
+      // 3️⃣ VALIDASI HASIL
+      if (rows.length === 0) {
+        AlertError("Data tidak ditemukan untuk kecamatan tersebut.");
+        setScrapStarted(false);
+        setScrapedRows(null);
+        setScrapedFields(null);
+        setShowPreview(false);
+        setPreview(null);
+        return;
+      }
+
+      // 3️⃣ SORT + NO (1x)
+      const sorted = sortRows(rows);
+      const finalRows = sorted.map((r, i) => ({
+        No: i + 1,
+        ...r
+      }));
+
+      // 4️⃣ SNAPSHOT
+      setScrapedRows(finalRows);
+      setScrapedFields([...fieldsForBackend]);
       setScrapStarted(true);
+      setShowPreview(false);
+      setPreview(null);
 
       AlertSuccess("Scraping selesai! Anda dapat membuka Preview atau Download data.");
     } catch {
-      AlertError("Terjadi kesalahan saat memproses data.");
+      AlertError("Terjadi kesalahan saat scraping.");
+    } finally {
+    setLoading(false);
     }
   }
-
 
   /* ==========================================================
      PREVIEW
@@ -308,8 +282,13 @@ export default function App() {
       setShowPreview(false);
       return;
     }
+  
+    const limit =
+        previewLimit === "all"
+          ? scrapedRows.length
+          : Number(previewLimit);
 
-    setPreview(scrapedRows.slice(0, 5));
+    setPreview(scrapedRows.slice(0, limit));
     setShowPreview(true);
   }
 
@@ -325,8 +304,9 @@ export default function App() {
     if (!ok) return;
 
     const filename = `data_sd_${filters.kecamatan.replace(/\s+/g, "_")}.${format}`;
+    const columns = makeColumnOrder(scrapedFields || []);
 
-    exportData(scrapedRows, filename, format);
+    exportData(scrapedRows, filename, format, columns);
     AlertSuccess("Download berhasil!");
   }
 
@@ -334,36 +314,29 @@ export default function App() {
      STATS
      ========================================================== */
   const stats = useMemo(() => {
-    if (!cacheRef.current.rows) return null;
+    if (!scrapedRows) return null;
 
-    const rows = cacheRef.current.rows;
-
-    const totalSekolah = rows.length;
-    const totalLaki = rows.reduce(
+    const totalSekolah = scrapedRows.length;
+    const totalLaki = scrapedRows.reduce(
       (s, r) => s + toInt(r["Jumlah Siswa Laki-laki"]),
       0
     );
 
     const rataLaki = totalSekolah ? Math.round(totalLaki / totalSekolah) : 0;
 
-    return {
-      totalSekolah,
-      totalLaki,
-      rataLaki
-    };
-  }, [cacheRef.current.rows]);
+    return { totalSekolah, totalLaki, rataLaki };
+  }, [scrapedRows]);
 
   /* ==========================================================
      CHART DATA
      ========================================================== */
   const chartData = useMemo(() => {
-    if (!cacheRef.current.rows) return [];
-
-    return cacheRef.current.rows.map(r => ({
+    if (!scrapedRows) return [];
+    return scrapedRows.map(r => ({
       sekolah: r["Nama Sekolah"],
       laki: toInt(r["Jumlah Siswa Laki-laki"])
     }));
-  }, [cacheRef.current.rows]);
+  }, [scrapedRows]);
 
   /* ==========================================================
      RENDER
@@ -391,11 +364,11 @@ export default function App() {
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            <span className="text-xs text-slate-500">Format</span>
+            <span className="text-slate-500">Format</span>
             <select
               value={format}
               onChange={e => setFormat(e.target.value)}
-              className="border rounded px-3 py-2"
+              className="border rounded px-4 py-2 rounded-xl text-sm bg-white shadow-sm"
             >
               <option value="xlsx">XLSX</option>
               <option value="csv">CSV</option>
@@ -507,6 +480,30 @@ export default function App() {
               loading={loading}
             />
 
+            {/* PREVIEW LIMIT */}
+            <div className="flex items-center gap-2 ml-2">
+              <span className="text-slate-500">Preview</span>
+              <select
+                value={previewLimit}
+                onChange={e => {
+                  const v = e.target.value;
+                  setPreviewLimit(v);
+
+                  // kalau preview sedang terbuka → update isi
+                  if (showPreview && scrapedRows) {
+                    const limit = v === "all" ? scrapedRows.length : Number(v);
+                    setPreview(scrapedRows.slice(0, limit));
+                  }
+                }}
+                className="border rounded px-4 py-2 text-sm rounded-xl bg-white shadow-sm"
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+
             <Btn
               text={`Download ${format.toUpperCase()}`}
               color="green"
@@ -521,22 +518,19 @@ export default function App() {
 
           {/* PREVIEW */}
           {showPreview && preview && preview.length > 0 ? (
-            <PreviewTable preview={preview} fields={fieldsForBackend} />
+            <PreviewTable preview={preview} fields={scrapedFields || []} />
           ) : (
             <EmptyState />
           )}
 
           {/* STAT CARDS */}
-          {stats && (
+          {scrapedRows && scrapedRows.length > 0 && (
             <StatCards stats={stats} />
           )}
 
           {/* CHART */}
-          {chartData.length > 0 && (
-            <StudentsChart
-              data={chartData}
-              kecamatan={filters.kecamatan}
-            />
+          {scrapedRows && scrapedRows.length > 0 && (
+            <StudentsChart data={chartData} kecamatan={filters.kecamatan} />
           )}
 
         </div>
