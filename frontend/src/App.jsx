@@ -30,7 +30,6 @@ import {
    ========================================================== */
 const FIELD_LABELS = [
   "Nama Sekolah",
-  "Kelurahan",
   "NPSN",
   "Status",
   "Kepala Sekolah",
@@ -108,7 +107,6 @@ function exportData(rows, filename, format, columns) {
    SORTING
    ========================================================== */
 const SORT_PRIORITY = [
-  "Kelurahan",
   "Nama Sekolah",
   "NPSN",
   "Status",
